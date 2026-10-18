@@ -28,7 +28,7 @@ flex-direction:column;
 padding:20px;
 }
 
-/* Fundo com efeito de desfoque da capa */
+/* Fundo desfoque da capa */
 .bg-ambient-cover{
 position:absolute;
 inset:0;
@@ -62,8 +62,7 @@ border-radius:50%;
 background:rgba(255,255,255,0.15);
 border:none;
 display:flex;
-align-items:center;
-justify-content:center;
+align-items:center;justify-content:center;
 cursor:pointer;
 backdrop-filter:blur(5px);
 color:#fff;
@@ -101,7 +100,7 @@ justify-content:center;
 text-align:center;
 width:100%;
 height:100%;
-padding: 0 10px;
+padding: 0 15px;
 }
 
 .lyrics-content{
@@ -119,10 +118,11 @@ will-change:transform, opacity;
 }
 
 .lyrics-content.error{
-font-size:3.5vh;
-color:rgba(255,255,255,0.6);
+font-size:3vh;
+color:rgba(255,255,255,0.7);
 text-transform:none;
 letter-spacing:normal;
+line-height:1.4;
 }
 
 /* ==========================================
@@ -142,8 +142,8 @@ backdrop-filter:blur(8px);
 .modal-overlay.show{display:flex;}
 
 .edit-box{
-width:85%;
-max-width:320px;
+width:90%;
+max-width:340px;
 padding:25px;
 border-radius:20px;
 background:#111;
@@ -153,7 +153,7 @@ border:1px solid rgba(255,255,255,0.1);
 }
 
 .edit-title{font-size:16px;font-weight:900;}
-.edit-subtitle{color:rgba(255,255,255,0.6);font-size:12px;margin:8px 0 15px;}
+.edit-subtitle{color:rgba(255,255,255,0.6);font-size:11px;margin:8px 0 12px;line-height:1.4}
 .edit-box input{
 width:100%;
 padding:12px;
@@ -201,7 +201,7 @@ border:none;
 <div class="modal-overlay" id="editPanel">
     <div class="edit-box">
         <div class="edit-title">Configurar Client ID</div>
-        <div class="edit-subtitle">Insira o Client ID do seu aplicativo no Spotify Developer Dashboard.</div>
+        <div class="edit-subtitle">Insira seu Client ID do Spotify Developer Dashboard:</div>
         <input id="clientIdInput" type="text" placeholder="Cole seu Client ID aqui">
         <div class="edit-actions">
             <button id="cancelConfig" class="cancel">Cancelar</button>
@@ -215,14 +215,10 @@ border:none;
 // CONFIGURAÇÕES E ESTADO DO PLAYER
 // ==========================================
 const SCOPES = 'user-read-currently-playing user-read-playback-state';
-
-// SEU CLIENT ID INSERIDO DIRETA E AUTOMATICAMENTE:
 const DEFAULT_CLIENT_ID = '57263ff164654084a66392c80efdae23';
 
 let clientId = localStorage.getItem('spotify_client_id') || DEFAULT_CLIENT_ID;
 let accessToken = localStorage.getItem('spotify_access_token') || '';
-
-// Garante que o Client ID seja salvo no armazenamento local
 localStorage.setItem('spotify_client_id', clientId);
 
 // Elementos da Interface
@@ -244,6 +240,11 @@ let isPlayingState = false;
 let lastSyncTimestamp = Date.now();
 let lastText = '';
 
+// Função auxiliar para obter exatamente a Redirect URI limpa
+function getRedirectUri() {
+    return window.location.origin + window.location.pathname;
+}
+
 // ==========================================
 // EVENTOS DE CONFIGURAÇÃO E AUTENTICAÇÃO
 // ==========================================
@@ -253,7 +254,7 @@ saveClientIdBtn.onclick = () => {
     clientId = clientIdInput.value.trim();
     localStorage.setItem('spotify_client_id', clientId);
     editPanel.classList.remove('show');
-    alert('Client ID atualizado com sucesso!');
+    alert('Client ID atualizado!');
 };
 
 connectNavBtn.onclick = async () => {
@@ -268,7 +269,7 @@ connectNavBtn.onclick = async () => {
     const challenge = await generateCodeChallenge(verifier);
     localStorage.setItem('code_verifier', verifier);
 
-    const redirectUri = window.location.origin + window.location.pathname;
+    const redirectUri = getRedirectUri();
     const args = new URLSearchParams({
         response_type: 'code',
         client_id: clientId,
@@ -283,6 +284,7 @@ connectNavBtn.onclick = async () => {
 
 disconnectNavBtn.onclick = () => {
     localStorage.removeItem('spotify_access_token');
+    localStorage.removeItem('code_verifier');
     accessToken = '';
     updateAuthUI();
     location.reload();
@@ -307,14 +309,14 @@ async function handleOAuthCallback() {
     const error = urlParams.get('error');
 
     if (error) {
-        lyricsContent.textContent = `❌ Erro: ${error}`;
+        lyricsContent.innerHTML = `❌ <b>Erro do Spotify:</b> ${error}<br><br><small>Verifique no Dashboard se a URI cadastrada é exatamente:<br><u style="color:#1db954">${getRedirectUri()}</u></small>`;
         lyricsContent.classList.add('error');
         return;
     }
 
     if (code) {
         const verifier = localStorage.getItem('code_verifier');
-        const redirectUri = window.location.origin + window.location.pathname;
+        const redirectUri = getRedirectUri();
         const body = new URLSearchParams({
             grant_type: 'authorization_code',
             code: code,
@@ -336,14 +338,14 @@ async function handleOAuthCallback() {
                 accessToken = data.access_token;
                 localStorage.setItem('spotify_access_token', accessToken);
                 window.history.replaceState({}, document.title, redirectUri);
-                lyricsContent.textContent = 'Conectado!';
+                lyricsContent.textContent = 'Conectado com Sucesso!';
                 lyricsContent.classList.remove('error');
             } else {
-                lyricsContent.textContent = '❌ Erro no Token';
+                lyricsContent.innerHTML = `❌ <b>Erro ao obter Token:</b> ${data.error_description || data.error}`;
                 lyricsContent.classList.add('error');
             }
         } catch (e) {
-            lyricsContent.textContent = '❌ Falha na conexão';
+            lyricsContent.textContent = '❌ Falha de rede ao conectar ao Spotify.';
             lyricsContent.classList.add('error');
         }
     }
@@ -371,7 +373,7 @@ async function fetchCurrentlyPlaying() {
         });
 
         if (res.status === 204) {
-            lyricsContent.textContent = 'Nenhuma música tocando.';
+            lyricsContent.textContent = 'Nenhuma música tocando no Spotify.';
             lyricsContent.classList.add('error');
             bgAmbientCover.style.backgroundImage = '';
             return;
@@ -441,7 +443,6 @@ function parseSyncedLyrics(lrcText) {
     });
 }
 
-// Loop de animação suave para sincronizar as legendas em tempo real
 function updatePlaybackLoop() {
     if (isPlayingState && currentLyricsLines.length > 0) {
         const now = Date.now();
@@ -477,7 +478,7 @@ window.onload = async () => {
     requestAnimationFrame(updatePlaybackLoop);
     if (accessToken) {
         fetchCurrentlyPlaying();
-        setInterval(fetchCurrentlyPlaying, 4000);
+        setInterval(fetchCurrentlyPlaying, 3000);
     }
 };
 </script>
