@@ -59,7 +59,7 @@ align-items:center;
 width:34px;
 height:34px;
 border-radius:50%;
-background:rgba(255,255,255,0.1);
+background:rgba(255,255,255,0.15);
 border:none;
 display:flex;
 align-items:center;
@@ -72,16 +72,17 @@ transition:all 0.2s ease;
 }
 
 .badge-btn{
-padding:4px 12px;
+padding:6px 14px;
 border:none;
 border-radius:999px;
-background:rgba(255,255,255,0.1);
+background:rgba(255,255,255,0.15);
 backdrop-filter:blur(5px);
-font-size:10px;
+font-size:11px;
 color:#fff;
 font-weight:800;
 cursor:pointer;
 transition:all 0.2s ease;
+box-shadow:0 4px 10px rgba(0,0,0,0.3);
 }
 
 .badge-btn.connect-btn{color:#10b981;}
@@ -118,8 +119,8 @@ will-change:transform, opacity;
 }
 
 .lyrics-content.error{
-font-size:4vh;
-color:rgba(255,255,255,0.5);
+font-size:3.5vh;
+color:rgba(255,255,255,0.6);
 text-transform:none;
 letter-spacing:normal;
 }
@@ -134,7 +135,7 @@ z-index:20;
 display:none;
 align-items:center;
 justify-content:center;
-background:rgba(0,0,0,0.8);
+background:rgba(0,0,0,0.85);
 backdrop-filter:blur(8px);
 }
 
@@ -161,6 +162,7 @@ border:1px solid rgba(255,255,255,0.1);
 background:#000;
 color:#fff;
 outline:none;
+font-size:12px;
 }
 
 .edit-actions{display:flex;gap:10px;margin-top:20px;}
@@ -213,8 +215,15 @@ border:none;
 // CONFIGURAÇÕES E ESTADO DO PLAYER
 // ==========================================
 const SCOPES = 'user-read-currently-playing user-read-playback-state';
-let clientId = localStorage.getItem('spotify_client_id') || '';
+
+// SEU CLIENT ID INSERIDO DIRETA E AUTOMATICAMENTE:
+const DEFAULT_CLIENT_ID = '57263ff164654084a66392c80efdae23';
+
+let clientId = localStorage.getItem('spotify_client_id') || DEFAULT_CLIENT_ID;
 let accessToken = localStorage.getItem('spotify_access_token') || '';
+
+// Garante que o Client ID seja salvo no armazenamento local
+localStorage.setItem('spotify_client_id', clientId);
 
 // Elementos da Interface
 const openConfigBtn = document.getElementById('openConfigBtn');
@@ -244,14 +253,14 @@ saveClientIdBtn.onclick = () => {
     clientId = clientIdInput.value.trim();
     localStorage.setItem('spotify_client_id', clientId);
     editPanel.classList.remove('show');
-    alert('Client ID salvo com sucesso! Agora você pode conectar.');
+    alert('Client ID atualizado com sucesso!');
 };
 
 connectNavBtn.onclick = async () => {
     if (!clientId) { alert('Configure o Client ID ⚙ primeiro.'); openConfigBtn.click(); return; }
     
     if (window.location.protocol === 'file:') {
-        alert('Atenção: O Spotify exige um servidor local (como Live Server) para autenticar.');
+        alert('Atenção: O Spotify exige um servidor local (como Live Server) ou GitHub Pages para autenticar.');
         return;
     }
 
@@ -343,3 +352,134 @@ async function handleOAuthCallback() {
 
 function updateAuthUI() {
     if (accessToken) {
+        connectNavBtn.style.display = 'none';
+        disconnectNavBtn.style.display = 'inline-flex';
+    } else {
+        connectNavBtn.style.display = 'inline-flex';
+        disconnectNavBtn.style.display = 'none';
+    }
+}
+
+// ==========================================
+// INTEGRAÇÃO COM O SPOTIFY E LRCLIB
+// ==========================================
+async function fetchCurrentlyPlaying() {
+    if (!accessToken) return;
+    try {
+        const res = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+
+        if (res.status === 204) {
+            lyricsContent.textContent = 'Nenhuma música tocando.';
+            lyricsContent.classList.add('error');
+            bgAmbientCover.style.backgroundImage = '';
+            return;
+        }
+
+        if (res.status === 401) {
+            localStorage.removeItem('spotify_access_token');
+            accessToken = '';
+            updateAuthUI();
+            lyricsContent.textContent = 'Sessão expirada. Reconecte.';
+            lyricsContent.classList.add('error');
+            return;
+        }
+
+        const data = await res.json();
+        if (!data || !data.item) return;
+
+        const item = data.item;
+        isPlayingState = data.is_playing;
+        localProgressMs = data.progress_ms || 0;
+        lastSyncTimestamp = Date.now();
+
+        if (item.album && item.album.images.length > 0) {
+            bgAmbientCover.style.backgroundImage = `url('${item.album.images[0].url}')`;
+        }
+
+        if (currentTrackId !== item.id) {
+            currentTrackId = item.id;
+            fetchLyricsLRCLIB(item.name, item.artists[0].name, item.duration_ms / 1000);
+        }
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+async function fetchLyricsLRCLIB(track, artist, durationSec) {
+    currentLyricsLines = [];
+    try {
+        const query = new URLSearchParams({ track_name: track, artist_name: artist, duration: Math.round(durationSec) });
+        const res = await fetch(`https://lrclib.net/api/get?${query.toString()}`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data.syncedLyrics) {
+                parseSyncedLyrics(data.syncedLyrics);
+                lyricsContent.classList.remove('error');
+                return;
+            }
+        }
+        lyricsContent.textContent = 'Legenda não encontrada.';
+        lyricsContent.classList.add('error');
+    } catch (e) {
+        lyricsContent.textContent = `${track} - ${artist}`;
+        lyricsContent.classList.add('error');
+    }
+}
+
+function parseSyncedLyrics(lrcText) {
+    const lines = lrcText.split('\n');
+    currentLyricsLines = [];
+    lines.forEach(line => {
+        const match = line.match(/\[(\d+):(\d+\.\d+)\](.*)/);
+        if (match) {
+            const timeMs = (parseInt(match[1]) * 60 + parseFloat(match[2])) * 1000;
+            const text = match[3].trim();
+            if (text) currentLyricsLines.push({ timeMs, text });
+        }
+    });
+}
+
+// Loop de animação suave para sincronizar as legendas em tempo real
+function updatePlaybackLoop() {
+    if (isPlayingState && currentLyricsLines.length > 0) {
+        const now = Date.now();
+        const currentMs = localProgressMs + (now - lastSyncTimestamp);
+
+        let activeText = '';
+        for (let i = 0; i < currentLyricsLines.length; i++) {
+            if (currentMs >= currentLyricsLines[i].timeMs) {
+                activeText = currentLyricsLines[i].text;
+            } else {
+                break;
+            }
+        }
+
+        if (activeText && activeText !== lastText) {
+            lyricsContent.style.opacity = 0;
+            lyricsContent.style.transform = 'scale(0.98)';
+            setTimeout(() => {
+                lyricsContent.textContent = activeText;
+                lyricsContent.style.opacity = 1;
+                lyricsContent.style.transform = 'scale(1)';
+            }, 50);
+            lastText = activeText;
+        }
+    }
+    requestAnimationFrame(updatePlaybackLoop);
+}
+
+// Inicialização
+window.onload = async () => {
+    await handleOAuthCallback();
+    updateAuthUI();
+    requestAnimationFrame(updatePlaybackLoop);
+    if (accessToken) {
+        fetchCurrentlyPlaying();
+        setInterval(fetchCurrentlyPlaying, 4000);
+    }
+};
+</script>
+</body>
+</html>
